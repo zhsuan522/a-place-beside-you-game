@@ -91,6 +91,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .home-stats .home-privacy { flex-direction: row; align-items: center; justify-content: flex-end; gap: 6px; }
 .home-privacy svg { width: 13px; height: 13px; color: #a3936e; }
 .home-privacy span { max-width: 65px; }
+.consent-panel { margin-top: 18px; padding: 15px 17px; border: 1px solid #e7e0d5; border-radius: 13px; background: rgba(255, 253, 248, .8); }
+.consent-copy h2, .pacing-prompt h2 { margin: 5px 0 7px; color: #424352; font-family: 'Noto Serif TC', serif; font-size: 15px; font-weight: 500; }
+.consent-copy p, .pacing-prompt p { margin: 0; color: #777983; font-size: 10px; line-height: 1.75; }
+.consent-copy .consent-detail { margin-top: 6px; color: #918e94; font-size: 9px; }
+.consent-choice { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; color: #565467; cursor: pointer; }
+.consent-choice input { flex: 0 0 auto; width: 17px; height: 17px; margin: 1px 0 0; accent-color: #625675; }
+.consent-choice strong, .consent-choice small { display: block; }
+.consent-choice strong { font-size: 10px; font-weight: 600; }
+.consent-choice small { margin-top: 3px; color: #99969b; font-size: 9px; line-height: 1.6; }
+.pacing-prompt { margin-top: 19px; padding: 15px 16px; border: 1px solid #e7e0d5; border-radius: 12px; background: #f8f5ee; }
+.pacing-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 11px; }
+.pacing-choices .secondary-button { min-height: 34px; padding: 0 10px; font-size: 10px; }
+.pacing-choices .text-button { padding: 7px 5px; font-size: 10px; }
 .status-pill { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 99px; color: #6c7562; background: #edf0e5; font-size: 9px; letter-spacing: .04em; }
 .status-pill .status-dot { width: 5px; height: 5px; background: #91a27a; box-shadow: none; }
 .status-pill.arrived { color: #8e675a; background: #f3e7dd; }

@@ -1,4 +1,6 @@
 const STORAGE_KEY = 'a-place-beside-you.prototype.v1';
+const ANALYTICS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwz8IpCwrlTtvZ2PW2Ttp2hmq7q_B53CB-R6XI7HgXdDwKTm30xmC0BE9Xmt49LlxQYzA/exec';
+const ANALYTICS_CONSENT_VERSION = 'interaction-experience-v1';
 const PLANET_ROOT = `${import.meta.env.BASE_URL}assets/packs/kenney/planets/Planets/`;
 const PLANET_NAMES = ['planet00.png', 'planet01.png', 'planet02.png', 'planet03.png', 'planet04.png', 'planet05.png', 'planet06.png', 'planet07.png', 'planet08.png', 'planet09.png'];
 
@@ -14,7 +16,7 @@ const supplies = {
 const durations = [6, 12, 24];
 
 function freshState() {
-  return { pet: { name: '我的毛孩', photo: '' }, planets: [], trips: [], activeTrip: null };
+  return { pet: { name: '我的毛孩', photo: '' }, planets: [], trips: [], activeTrip: null, telemetryConsent: false };
 }
 
 function loadState() {
@@ -28,6 +30,7 @@ function loadState() {
       planets: Array.isArray(saved.planets) ? saved.planets : [],
       trips: Array.isArray(saved.trips) ? saved.trips : [],
       activeTrip: saved.activeTrip || null,
+      telemetryConsent: saved.telemetryConsent === true,
     };
   } catch {
     return freshState();
@@ -93,6 +96,7 @@ export function mountGameUI() {
   let state = loadState();
   let page = 'home';
   let draft = null;
+  let pacingPromptTripId = null;
   let toastTimer;
   const root = document.querySelector('#ui-root');
   const isDevelopment = import.meta.env.DEV;
@@ -102,6 +106,7 @@ export function mountGameUI() {
     if (trip?.status === 'travelling' && Date.now() >= trip.arrivesAt) {
       trip.status = 'pending';
       trip.arrivedAt = Date.now();
+      if (page === 'mail') recordPostcardOpened();
       saveState(state);
       if (page === 'plan') page = 'home';
       render();
@@ -115,6 +120,61 @@ export function mountGameUI() {
     toast.classList.add('visible');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('visible'), 2800);
+  }
+
+  function newUuid() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+      const value = Math.floor(Math.random() * 16);
+      return (char === 'x' ? value : (value & 0x3) | 0x8).toString(16);
+    });
+  }
+
+  function sendInteractionEvent(eventType, trip, details = {}) {
+    if (isDevelopment || !state.telemetryConsent || !trip || typeof fetch !== 'function') return false;
+    if (!trip.analyticsJourneyId) trip.analyticsJourneyId = newUuid();
+    const payload = {
+      schemaVersion: 1,
+      consentGranted: true,
+      consentVersion: ANALYTICS_CONSENT_VERSION,
+      eventId: newUuid(),
+      journeyId: trip.analyticsJourneyId,
+      eventType,
+      ...details,
+    };
+
+    try {
+      // Apps Script accepts this simple text/plain POST; its response is intentionally unread.
+      void fetch(ANALYTICS_ENDPOINT, {
+        method: 'POST',
+        mode: 'no-cors',
+        credentials: 'omit',
+        redirect: 'follow',
+        cache: 'no-store',
+        keepalive: true,
+        headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function recordPostcardOpened() {
+    const trip = state.activeTrip;
+    if (trip?.status !== 'pending' || trip.analyticsPostcardOpened) return;
+    if (sendInteractionEvent('postcard_opened', trip)) {
+      trip.analyticsPostcardOpened = true;
+      saveState(state);
+    }
+  }
+
+  function renderTelemetryConsent() {
+    if (isDevelopment) {
+      return '<section class="consent-panel"><span class="eyebrow">互動紀錄</span><p>本機開發預覽不會傳送互動紀錄。</p></section>';
+    }
+    return `<section class="consent-panel" aria-labelledby="consent-heading"><div class="consent-copy"><span class="eyebrow">完全自願・不影響遊戲</span><h2 id="consent-heading">分享互動紀錄</h2><p>開啟後，會傳送隨機事件與旅程代碼、旅程選項、明信片開啟／收藏，以及你選擇回覆的步調；伺服器也會記錄收到事件的時間。</p><p class="consent-detail">不會傳送毛孩姓名、照片、場景描述或信件。紀錄會寫入遊戲維護者的 Google 試算表；關閉後停止傳送新紀錄，已寫入的資料不會自動刪除。</p></div><label class="consent-choice"><input type="checkbox" data-telemetry-consent ${state.telemetryConsent ? 'checked' : ''}><span><strong>我願意提供上述互動紀錄</strong><small>你可以隨時回到這裡關閉。</small></span></label></section>`;
   }
 
   function updateCountdowns() {
@@ -139,7 +199,7 @@ export function mountGameUI() {
   function renderHome() {
     const memories = state.trips.length;
     const planets = state.planets.length;
-    return `<div class="view-heading"><div><span class="eyebrow">今天的小樹屋</span><h1>星光替你留著位置。</h1></div><span class="mood-mark" aria-hidden="true">✦</span></div>${currentJourneyCard()}<div class="home-stats"><div><strong>${planets}</strong><span>顆星球</span></div><div><strong>${memories}</strong><span>封已收藏的明信片</span></div><div class="home-privacy">${icon('lock')}<span>只有你能看見</span></div></div>`;
+    return `<div class="view-heading"><div><span class="eyebrow">今天的小樹屋</span><h1>星光替你留著位置。</h1></div><span class="mood-mark" aria-hidden="true">✦</span></div>${currentJourneyCard()}<div class="home-stats"><div><strong>${planets}</strong><span>顆星球</span></div><div><strong>${memories}</strong><span>封已收藏的明信片</span></div><div class="home-privacy">${icon('lock')}<span>回憶留在此裝置</span></div></div>${renderTelemetryConsent()}`;
   }
 
   function renderPlan() {
@@ -153,7 +213,7 @@ export function mountGameUI() {
       <div class="form-section"><span class="field-label">想帶上一件什麼？ <span class="required-hint">不消耗任何資源</span></span><div class="choice-grid supply-choices">${Object.entries(supplies).map(([key, supply]) => `<button type="button" class="choice-card compact ${draft?.supply === key ? 'selected' : ''}" data-action="choose" data-kind="supply" data-value="${key}" aria-pressed="${draft?.supply === key}"><span class="choice-symbol">${supply.symbol}</span><strong>${supply.label}</strong><span class="choice-check">✓</span></button>`).join('')}</div></div>
       <div class="form-section"><span class="field-label">旅程會在什麼時候抵達？ <span class="required-hint">請選一個時間</span></span><div class="duration-row">${durations.map((hours) => `<button type="button" class="duration-choice ${draft?.hours === hours ? 'selected' : ''}" data-action="choose" data-kind="hours" data-value="${hours}" aria-pressed="${draft?.hours === hours}"><strong>${hours}</strong><span>小時</span></button>`).join('')}</div><div class="field-hint">關閉瀏覽器不會中斷旅程；晚回來也不會失去任何內容。</div></div>
       <div class="form-section"><label class="field-label" for="letter">想留一封信嗎？ <span class="required-hint">可以略過</span></label><textarea id="letter" class="text-field text-area short-area" data-field="letter" maxlength="500" placeholder="寫給牠的幾句話……">${safeText(draft?.letter || '')}</textarea><div class="field-hint">這封信只保存在你的私人相簿，不會收到回信。</div></div>
-      <div class="form-actions"><button type="button" class="secondary-button" data-nav="home">先不安排</button><button type="submit" class="primary-button">送牠出發 <span>${icon('arrow')}</span></button></div><p class="local-note">這是可玩原型；資料目前只保存在這個瀏覽器。</p>
+      <div class="form-actions"><button type="button" class="secondary-button" data-nav="home">先不安排</button><button type="submit" class="primary-button">送牠出發 <span>${icon('arrow')}</span></button></div><p class="local-note">毛孩照片與私人文字留在本機；互動紀錄可自選提供。</p>
     </form>`;
   }
 
@@ -191,7 +251,11 @@ export function mountGameUI() {
       const supply = supplies[trip.supply] || supplies.keepsake;
       return `<article class="memory-card"><div class="memory-cover ${trip.scene}"><img src="${planetImage(index)}" alt=""><span>${scene.symbol}</span></div><div class="memory-content"><span class="eyebrow">${localDate(trip.readAt || trip.arrivedAt || trip.arrivesAt)}</span><h3>${safeText(planet?.name || '一顆星球')}</h3><p>${safeText(trip.description || scene.caption)}</p><div class="memory-souvenir">${supply.symbol} ${supply.souvenir}</div>${trip.letter ? `<details class="memory-letter"><summary>讀讀你寫的信</summary><p>${safeText(trip.letter)}</p></details>` : ''}</div></article>`;
     }).join('');
-    return `<div class="view-heading"><div><span class="eyebrow">私人收藏・只有你能看見</span><h1>回憶相簿</h1></div><span class="mood-mark">♡</span></div><section class="profile-card"><div class="profile-photo-wrap">${photo}</div><div class="profile-fields"><label class="field-label" for="pet-name">毛孩的名字</label><input id="pet-name" class="text-field" data-field="pet-name" maxlength="32" value="${safeText(state.pet.name)}"><p>照片與文字只保存在這個瀏覽器，不會公開分享。</p></div><div class="photo-actions"><label class="upload-button" for="pet-photo">${state.pet.photo ? '更換照片' : '選擇照片'}</label><input id="pet-photo" class="visually-hidden" type="file" accept="image/*"><button class="text-button" data-action="${state.pet.photo ? 'remove-photo' : 'noop'}" ${state.pet.photo ? '' : 'disabled'}>移除</button></div></section><div class="album-section-heading"><div><span class="eyebrow">每一段旅程都被好好收著</span><h2>明信片與紀念品 <span class="count-badge">${state.trips.length}</span></h2></div></div>${memories ? `<div class="memory-list">${memories}</div>` : `<div class="empty-state compact-empty"><div class="empty-orbit">♡</div><h2>相簿還是空的</h2><p>讀完第一張明信片後，旅程和紀念品會一起收進這裡。</p><button class="secondary-button" data-nav="home">回到小樹屋</button></div>`}<section class="data-tools"><div><strong>你的資料，由你保管</strong><p>下載一份本機備份，或刪除這個原型存下的全部內容。</p></div><div class="data-buttons"><button class="secondary-button" data-action="export">下載資料備份</button><button class="text-button danger-text" data-action="clear-data">刪除本機資料</button></div></section>`;
+    const feedbackTrip = state.telemetryConsent
+      ? state.trips.find((trip) => trip.id === pacingPromptTripId)
+      : null;
+    const pacingPrompt = feedbackTrip ? `<section class="pacing-prompt"><span class="eyebrow">完全自願・不影響遊戲</span><h2>這趟旅程的步調如何？</h2><p>只記錄你選擇的回覆，不會改變旅程。</p><div class="pacing-choices"><button class="secondary-button" data-action="pacing-feedback" data-value="fits">符合我的步調</button><button class="secondary-button" data-action="pacing-feedback" data-value="slower">想慢一點</button><button class="secondary-button" data-action="pacing-feedback" data-value="faster">想快一點</button><button class="text-button" data-action="pacing-feedback" data-value="skip">略過</button></div></section>` : '';
+    return `<div class="view-heading"><div><span class="eyebrow">私人收藏・只有你能看見</span><h1>回憶相簿</h1></div><span class="mood-mark">♡</span></div><section class="profile-card"><div class="profile-photo-wrap">${photo}</div><div class="profile-fields"><label class="field-label" for="pet-name">毛孩的名字</label><input id="pet-name" class="text-field" data-field="pet-name" maxlength="32" value="${safeText(state.pet.name)}"><p>照片與文字只保存在這個瀏覽器，不會公開分享。</p></div><div class="photo-actions"><label class="upload-button" for="pet-photo">${state.pet.photo ? '更換照片' : '選擇照片'}</label><input id="pet-photo" class="visually-hidden" type="file" accept="image/*"><button class="text-button" data-action="${state.pet.photo ? 'remove-photo' : 'noop'}" ${state.pet.photo ? '' : 'disabled'}>移除</button></div></section>${pacingPrompt}<div class="album-section-heading"><div><span class="eyebrow">每一段旅程都被好好收著</span><h2>明信片與紀念品 <span class="count-badge">${state.trips.length}</span></h2></div></div>${memories ? `<div class="memory-list">${memories}</div>` : `<div class="empty-state compact-empty"><div class="empty-orbit">♡</div><h2>相簿還是空的</h2><p>讀完第一張明信片後，旅程和紀念品會一起收進這裡。</p><button class="secondary-button" data-nav="home">回到小樹屋</button></div>`}<section class="data-tools"><div><strong>你的資料，由你保管</strong><p>下載一份本機備份，或刪除這個原型存下的全部內容。</p></div><div class="data-buttons"><button class="secondary-button" data-action="export">下載資料備份</button><button class="text-button danger-text" data-action="clear-data">刪除本機資料</button></div></section>`;
   }
 
   function viewContent() {
@@ -203,10 +267,12 @@ export function mountGameUI() {
   }
 
   function render() {
-    root.innerHTML = `<div class="app-shell"><header class="topbar"><button class="brand" data-nav="home" aria-label="回到星空小樹屋"><span class="brand-symbol">✦</span><span><strong>換個地方陪著你</strong><small>星空小樹屋</small></span></button><nav class="main-nav" aria-label="遊戲導覽"><button class="nav-link ${page === 'home' || page === 'plan' ? 'active' : ''}" data-nav="home">${icon('home')}<span>小樹屋</span></button><button class="nav-link ${page === 'map' ? 'active' : ''}" data-nav="map">${icon('map')}<span>星圖</span></button><button class="nav-link ${page === 'mail' ? 'active' : ''}" data-nav="mail">${icon('mail')}<span>信箱</span>${state.activeTrip?.status === 'pending' ? '<i class="nav-badge" aria-label="有一封新信"></i>' : ''}</button><button class="nav-link ${page === 'album' ? 'active' : ''}" data-nav="album">${icon('album')}<span>相簿</span></button></nav><div class="top-private">${icon('lock')}<span>私人空間</span></div></header><main class="main-layout"><section class="story-side"><div class="story-content"><span class="story-kicker"><i></i> A LITTLE PLACE IN THE STARS</span><h1>星空小樹屋</h1><p>把想念放進一段旅程，<br>讓回憶慢慢抵達。</p><div class="story-divider"><span>✦</span></div><div class="story-caption"><span class="tiny-label">給 ${safeText(state.pet.name)}</span><strong>無論何時回來，<br>都有一盞燈為你亮著。</strong></div></div><div class="story-signature">一個安靜、私人的紀念角落 <span>✧</span></div></section><section class="game-panel" aria-live="polite"><div class="panel-topline"><span class="panel-location"><span class="location-dot"></span> 星空小樹屋</span><span class="panel-date">${new Intl.DateTimeFormat('zh-TW', { dateStyle: 'full' }).format(new Date())}</span></div><div class="page-view">${viewContent()}</div></section></main><footer class="app-footer"><span>原型預覽</span><span class="footer-separator">·</span><span>內容只保存在此裝置</span><span class="footer-spacer"></span><span>不必趕路，回憶自有方向 <b>✦</b></span></footer><div id="toast" class="toast" role="status" aria-live="polite"></div></div>`;
+    root.innerHTML = `<div class="app-shell"><header class="topbar"><button class="brand" data-nav="home" aria-label="回到星空小樹屋"><span class="brand-symbol">✦</span><span><strong>換個地方陪著你</strong><small>星空小樹屋</small></span></button><nav class="main-nav" aria-label="遊戲導覽"><button class="nav-link ${page === 'home' || page === 'plan' ? 'active' : ''}" data-nav="home">${icon('home')}<span>小樹屋</span></button><button class="nav-link ${page === 'map' ? 'active' : ''}" data-nav="map">${icon('map')}<span>星圖</span></button><button class="nav-link ${page === 'mail' ? 'active' : ''}" data-nav="mail">${icon('mail')}<span>信箱</span>${state.activeTrip?.status === 'pending' ? '<i class="nav-badge" aria-label="有一封新信"></i>' : ''}</button><button class="nav-link ${page === 'album' ? 'active' : ''}" data-nav="album">${icon('album')}<span>相簿</span></button></nav><div class="top-private">${icon('lock')}<span>私人空間</span></div></header><main class="main-layout"><section class="story-side"><div class="story-content"><span class="story-kicker"><i></i> A LITTLE PLACE IN THE STARS</span><h1>星空小樹屋</h1><p>把想念放進一段旅程，<br>讓回憶慢慢抵達。</p><div class="story-divider"><span>✦</span></div><div class="story-caption"><span class="tiny-label">給 ${safeText(state.pet.name)}</span><strong>無論何時回來，<br>都有一盞燈為你亮著。</strong></div></div><div class="story-signature">一個安靜、私人的紀念角落 <span>✧</span></div></section><section class="game-panel" aria-live="polite"><div class="panel-topline"><span class="panel-location"><span class="location-dot"></span> 星空小樹屋</span><span class="panel-date">${new Intl.DateTimeFormat('zh-TW', { dateStyle: 'full' }).format(new Date())}</span></div><div class="page-view">${viewContent()}</div></section></main><footer class="app-footer"><span>原型預覽</span><span class="footer-separator">·</span><span>照片與私人文字留在此裝置；互動紀錄可自選提供</span><span class="footer-spacer"></span><span>不必趕路，回憶自有方向 <b>✦</b></span></footer><div id="toast" class="toast" role="status" aria-live="polite"></div></div>`;
   }
 
   function navigate(next) {
+    if (next === 'mail' && state.activeTrip?.status === 'pending') recordPostcardOpened();
+    if (next !== 'album') pacingPromptTripId = null;
     page = next;
     if (next === 'plan' && !draft) draft = { planetId: 'new', planetName: `${state.pet.name}的星球`, description: '', scene: null, supply: null, hours: null, letter: '' };
     render();
@@ -216,6 +282,7 @@ export function mountGameUI() {
   function startTrip() {
     if (state.activeTrip) {
       page = state.activeTrip.status === 'pending' ? 'mail' : 'home';
+      if (page === 'mail') recordPostcardOpened();
       render();
       return;
     }
@@ -252,6 +319,11 @@ export function mountGameUI() {
       departedAt: Date.now(),
       arrivesAt,
     };
+    sendInteractionEvent('trip_started', state.activeTrip, {
+      scene: state.activeTrip.scene,
+      supply: state.activeTrip.supply,
+      durationHours: state.activeTrip.hours,
+    });
     draft = null;
     saveState(state);
     page = 'home';
@@ -261,7 +333,11 @@ export function mountGameUI() {
 
   function readPostcard() {
     if (state.activeTrip?.status !== 'pending') return;
-    state.trips.unshift({ ...state.activeTrip, status: 'read', readAt: Date.now() });
+    recordPostcardOpened();
+    const archivedTrip = { ...state.activeTrip, status: 'read', readAt: Date.now() };
+    sendInteractionEvent('postcard_archived', archivedTrip);
+    state.trips.unshift(archivedTrip);
+    pacingPromptTripId = state.telemetryConsent ? archivedTrip.id : null;
     state.activeTrip = null;
     saveState(state);
     page = 'album';
@@ -323,6 +399,16 @@ export function mountGameUI() {
       render();
     }
     if (action === 'read') readPostcard();
+    if (action === 'pacing-feedback') {
+      const trip = state.trips.find((item) => item.id === pacingPromptTripId);
+      const feedback = control.dataset.value;
+      if (trip && ['fits', 'slower', 'faster', 'skip'].includes(feedback)) {
+        sendInteractionEvent('pacing_feedback', trip, { pacingFeedback: feedback });
+        pacingPromptTripId = null;
+        render();
+        if (feedback !== 'skip') showToast('謝謝你留下感受。');
+      }
+    }
     if (action === 'preview' && isDevelopment && state.activeTrip?.status === 'travelling') {
       state.activeTrip.arrivesAt = Date.now() - 1;
       refreshTripStatus();
@@ -336,7 +422,7 @@ export function mountGameUI() {
     }
     if (action === 'export') exportData();
     if (action === 'clear-data') {
-      if (window.confirm('要刪除這台裝置中保存的照片、文字、星球與旅程嗎？這個動作無法復原。')) {
+      if (window.confirm('要刪除這台裝置中保存的照片、文字、星球與旅程嗎？已送出的互動紀錄不會一併刪除。這個動作無法復原。')) {
         localStorage.removeItem(STORAGE_KEY);
         state = freshState();
         page = 'home';
@@ -360,6 +446,13 @@ export function mountGameUI() {
   });
 
   root.addEventListener('change', (event) => {
+    if (event.target.matches('[data-telemetry-consent]')) {
+      state.telemetryConsent = event.target.checked === true;
+      if (!state.telemetryConsent) pacingPromptTripId = null;
+      saveState(state);
+      showToast(state.telemetryConsent ? '已開啟後續互動紀錄分享。' : '已關閉後續互動紀錄分享。');
+      return;
+    }
     if (event.target.matches('[data-field="planetId"]')) {
       draft.planetId = event.target.value;
       if (draft.planetId === 'new' && !draft.planetName) draft.planetName = `${state.pet.name}的星球`;
